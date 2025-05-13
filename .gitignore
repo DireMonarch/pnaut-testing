@@ -8,6 +8,10 @@ graphs/
 #python
 .venv/
 
+#macos
+.DS_store
+.DS_Store
+
 # Prerequisites
 *.d
 

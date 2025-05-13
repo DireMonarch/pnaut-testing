@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
     int codetype;
     char * infilename;
     if (argc < 2){
-        infilename = "/Users/jim/Dropbox/Wayne State/Research/Graph Isomorphism/code/gi-cl-parallel/Graph-Isomorphism-by-Canonical-Relabeling-in-Parallel/samples/tener-f7.g6";
+        infilename = "../graphs/M-10.g6";
         // printf("Need to pass graph file name as CLI parameter!\n");
         // exit(1);
     } else {
