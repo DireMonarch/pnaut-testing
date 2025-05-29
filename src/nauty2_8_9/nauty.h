@@ -340,6 +340,8 @@ it is necessary to check they are correct.
 *                                                                            *
 *****************************************************************************/
 
+#define MAXN 200
+
 /*****************************************************************************
 *                                                                            *
 *   16-bit, 32-bit and 64-bit versions can be selected by defining WORDSIZE. *

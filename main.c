@@ -1,5 +1,8 @@
+#include "src/nauty2_8_9/nauty.h"
 #include "src/nauty2_8_9/gtools.h"
+
 // #include "/Users/jim/Dropbox/Wayne State/Research/Graph Isomorphism/code/nauty/nauty2_8_9/showg.c"
+
 
 
 static void
@@ -24,13 +27,42 @@ putam(FILE *f, graph *g, int linelength, boolean space, boolean triang,
     }
 }
 
+/**
+ * This is just for testing the stack functionality
+ */
+// #include "nsb_stack.h"
+// void test_stack() {
+//     Stack *st;
+//     DYNALLOCSTACK(st, "test")
+
+//     Node *n;
+
+//     for (int i = 0; i < 10; ++i) {
+//         DYNALLOCNODE(n, "test")
+//         n->comp_canon = i;
+//         stack_push(st, n);
+//         printf("Pushed %d\n", i);
+//     }
+
+//     printf("\nSize: %zu     Peek: %d    Peek @ 5: %d\n\n", st->size, stack_peek(st)->comp_canon, stack_peek_at(st, 5)->comp_canon);
+
+//     stack_delete_from_bottom(st, 5);
+
+//     while(stack_size(st) > 0) {
+//         printf("Popped %d\n", stack_pop(st)->comp_canon);
+//     }
+
+//     FREESTACK(st)
+// }
 
 int main(int argc, char *argv[]) {
+    // test_stack();
+    // exit(0);
     FILE *infile;
     int codetype;
     char * infilename;
     if (argc < 2){
-        infilename = "../graphs/M-10.g6";
+        infilename = "../graphs/M-1.g6";
         // printf("Need to pass graph file name as CLI parameter!\n");
         // exit(1);
     } else {
@@ -70,6 +102,9 @@ int main(int argc, char *argv[]) {
 
     densenauty(g, lab, ptn, orbits, &options, &stats, m, n, h);
 
+    // printf("\nOriginal:\n");
+    // putam(stdout, g, 0, TRUE, FALSE, m, n);
+    // printf("\nRelabeled:\n");
     // putam(stdout, h, 0, TRUE, FALSE, m, n);
 
     printf("Number of nodes: %lu\n", stats.numnodes);
