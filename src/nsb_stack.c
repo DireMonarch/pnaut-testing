@@ -16,6 +16,7 @@
 
  #include "nsb_stack.h"
  #include "node.h"
+ #include "path.h"
 
 void stack_push(Stack *stack, Node *node) {
     StackNode *new_stacknode;
@@ -84,5 +85,21 @@ void stack_delete_from_bottom(Stack * stack, size_t count) {
         ptr = tmp->next;
         FREENODE(tmp->node)
         FREESTACKNODE(tmp)
+    }
+}
+
+void stack_visualize(Stack *stack, int n) {
+    StackNode *curr = stack->top;
+    Node *node;
+    while (curr != NULL) {
+        node = curr->node;
+
+        path_visualize(node->path); printf("\n");
+
+        node_visualize(node, n);
+        printf("\n");
+
+        /* get next StackNode */
+        curr = curr->next;
     }
 }
