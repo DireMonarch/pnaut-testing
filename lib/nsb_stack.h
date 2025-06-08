@@ -41,6 +41,7 @@ Node* stack_peek(Stack *stack);
 size_t stack_size(Stack *stack);
 Node* stack_peek_at(Stack *stack, size_t idx);
 void stack_delete_from_bottom(Stack * stack, size_t count);
+void stack_visualize(Stack*, int);
 
 
 #define DYNALLOCSTACK(name,msg) \

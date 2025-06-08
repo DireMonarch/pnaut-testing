@@ -73,6 +73,8 @@
 #include "nauty.h"
 #include "schreier.h"
 #include "node.h"
+#include "nsb_stack.h"
+#include "path.h"
 
 #ifdef NAUTY_IN_MAGMA
 #include "cleanup.e"
@@ -91,10 +93,16 @@ typedef struct tcnode_struct
 
 #ifndef NAUTY_IN_MAGMA
 #if !MAXN
-static int firstpathnode0(Node*, int, int, tcnode*);
+static int firstpathnode0_new(Node*, Stack*, tcnode*);
+static int othernode0_new(Node*, Stack*, tcnode*);
+static int firstnode0(Node*, Stack*, int, int, tcnode*);
+static int firstpathnode0(Node*, Stack*, int, int, tcnode*);
 static int othernode0(Node*, int, int, tcnode*);
 #else
-static int firstpathnode(Node*, int, int);
+static int firstnode(Node*, Stack*, int, int);
+static int firstpathnode_new(Node*, Stack*);
+static int othernode_new(Node*, Stack*);
+static int firstpathnode(Node*, Stack*, int, int);
 static int othernode(Node*, int, int);
 #endif
 static void firstterminal(int*, int, Node*);
@@ -165,13 +173,13 @@ static TLS_ATTR boolean needshortprune;  /* used to flag calls to shortprune */
 #if !MAXN
 DYNALLSTAT(set,defltwork,defltwork_sz);     /* workspace in case none provided */
 DYNALLSTAT(int,workperm,workperm_sz);       /* various scratch uses */
-DYNALLSTAT(set,fixedpts,fixedpts_sz);       /* points which were explicitly fixed to get current node */
+// DYNALLSTAT(set,fixedpts,fixedpts_sz);       /* points which were explicitly fixed to get current node */
 DYNALLSTAT(int,firstlab,firstlab_sz);       /* label from first leaf */ /* once set int he first leaf, shouldn't change */
 DYNALLSTAT(int,canonlab,canonlab_sz);       /* label from bsf leaf */ /* set at first leaf, and at any time a better Canonica Label is found */
 DYNALLSTAT(short,firstcode,firstcode_sz);   /* codes for first leaf */
 DYNALLSTAT(short,canoncode,canoncode_sz);   /* codes for bsf leaf */
 DYNALLSTAT(int,firsttc,firsttc_sz);         /* index of target cell for left path */
-DYNALLSTAT(set,active,active_sz);           /* used to contain index to cells now active for refinement purposes */
+// DYNALLSTAT(set,active,active_sz);           /* used to contain index to cells now active for refinement purposes */
 
 /* In the dynamically allocated case (MAXN=0), each level of recursion
    needs one set (tcell) to represent the target cell.  This is 
@@ -186,17 +194,17 @@ static TLS_ATTR tcnode tcnode0 = {NULL,NULL};
 static TLS_ATTR int alloc_m = 0;
 
 #else
-static TLS_ATTR set defltwork[2*MAXM];   /* workspace in case none provided */
-static TLS_ATTR int workperm[MAXN];   /* various scratch uses */
-static TLS_ATTR set fixedpts[MAXM];      /* points which were explicitly
-                                    fixed to get current node */
-static TLS_ATTR int firstlab[MAXN],   /* label from first leaf */
-               canonlab[MAXN];   /* label from bsf leaf */
-static TLS_ATTR short firstcode[MAXN+2],      /* codes for first leaf */
-         canoncode[MAXN+2];      /* codes for bsf leaf */
-static TLS_ATTR int firsttc[MAXN+2];  /* index of target cell for left path */
-static TLS_ATTR set active[MAXM];     /* used to contain index to cells now
-                                    active for refinement purposes */
+static TLS_ATTR set defltwork[2*MAXM];      /* workspace in case none provided */
+static TLS_ATTR int workperm[MAXN];         /* various scratch uses */
+// static TLS_ATTR set fixedpts[MAXM];      /* points which were explicitly fixed to get current node */
+static TLS_ATTR int firstlab[MAXN],         /* label from first leaf */
+               canonlab[MAXN];              /* label from bsf leaf */
+static TLS_ATTR Path *firstpath;            /* path of first leaf */  /* I added this, maybe shouldn't be static global */
+static TLS_ATTR Path *canonpath;            /* path of bsf leaf */  /* I added this, maybe shouldn't be static global */
+static TLS_ATTR short firstcode[MAXN+2],    /* codes for first leaf */
+         canoncode[MAXN+2];                 /* codes for bsf leaf */
+static TLS_ATTR int firsttc[MAXN+2];        /* index of target cell for left path */
+// static TLS_ATTR set active[MAXM];           /* used to contain index to cells now active for refinement purposes */
 #endif
 
 static TLS_ATTR set *workspace,*worktop;  /* first and just-after-last
@@ -267,10 +275,16 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
      * Allocate root node
      */
     Node *root;
-    DYNALLOCNODE(root, "Allocate Root")
+    DYNALLOCNODE(root, "Allocate Root");
+
+    Stack *stack;
+    DYNALLOCSTACK(stack, "Create Stack");
 
     root->lab = lab;
     root->ptn = ptn;
+    root->fixedpts = (set*)malloc(m * sizeof(set));
+    root->active = (set*)malloc(m * sizeof(set));
+    DYNALLOCPATH(root->path, 0, "Root Path");
 
     /* determine dispatch vector */
 
@@ -346,7 +360,7 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
         g = canong = NULL;
         initstatus = 0;
         OPTCALL(dispatch.init)(g_arg,&g,canong_arg,&canong,
-                root->lab,root->ptn,active,options,&initstatus,m,n);
+                root->lab,root->ptn,root->active,options,&initstatus,m,n);
         if (initstatus) stats->errstatus = initstatus;
 
         if (g == NULL) g = g_arg;
@@ -365,8 +379,8 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
 
 #if !MAXN
     DYNALLOC1(set,defltwork,defltwork_sz,2*m,"nauty");
-    DYNALLOC1(set,fixedpts,fixedpts_sz,m,"nauty");
-    DYNALLOC1(set,active,active_sz,m,"nauty");
+    // DYNALLOC1(set,fixedpts,fixedpts_sz,m,"nauty");
+    // DYNALLOC1(set,active,active_sz,m,"nauty");
     DYNALLOC1(int,workperm,workperm_sz,n,"nauty");
     DYNALLOC1(int,firstlab,firstlab_sz,n,"nauty");
     DYNALLOC1(int,canonlab,canonlab_sz,n,"nauty");
@@ -438,8 +452,8 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
             root->ptn[i] = NAUTY_INFINITY;
         }
         root->ptn[n-1] = 0;
-        EMPTYSET(active,m);
-        ADDELEMENT(active,0);
+        EMPTYSET(root->active,m);
+        ADDELEMENT(root->active,0);
         numcells = 1;
     }
     else
@@ -451,21 +465,21 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
             else             ++numcells;
         if (active_arg == NULL)
         {
-            EMPTYSET(active,m);
+            EMPTYSET(root->active,m);
             for (i = 0; i < n; ++i)
             {
-                ADDELEMENT(active,i);
+                ADDELEMENT(root->active,i);
                 while (root->ptn[i]) ++i;
             }
         }
         else
-            for (i = 0; i < M; ++i) active[i] = active_arg[i];
+            for (i = 0; i < M; ++i) root->active[i] = active_arg[i];
     }
 
     g = canong = NULL;
     initstatus = 0;
     OPTCALL(dispatch.init)(g_arg,&g,canong_arg,&canong,
-            root->lab,root->ptn,active,options,&initstatus,m,n);
+            root->lab,root->ptn,root->active,options,&initstatus,m,n);
     if (initstatus)
     {
         stats->errstatus = initstatus;
@@ -486,7 +500,7 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
     stats->tctotal = 0;
     stats->canupdates = 0;
     stats->numorbits = n;
-    EMPTYSET(fixedpts,m);
+    EMPTYSET(root->fixedpts,m);
     stglb_noncheaplevel = 1;
     root->eqlev_canon = -1;       /* needed even if !getcanon */
 
@@ -507,12 +521,84 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
     invapplics = invsuccesses = 0;
 
 
+    root->numcells = numcells;
+    root->level = 1;
+
 
 #if !MAXN
-    retval = firstpathnode0(root, 1, numcells, &tcnode0);
+    retval = firstnode0(root, 1, numcells, &tcnode0);
 #else   
-    retval = firstpathnode(root, 1, numcells);
+    retval = firstnode(root, stack, 1, numcells);
 #endif  
+    path_visualize(root->path); printf("\n");
+    node_visualize(root, n); printf("\n");
+printf("stglb_noncheaplevel: %d\n", stglb_noncheaplevel);
+    // stack_visualize(stack, n);
+    Node *curr;
+    int found_first_leaf = 0;
+    
+    while(!found_first_leaf) {
+        if (curr) FREES(curr);
+        curr = stack_pop(stack);
+        found_first_leaf = firstpathnode_new(curr, stack);
+        path_visualize(curr->path); printf("\n");
+        node_visualize(curr, n); printf("\n");
+printf("stglb_noncheaplevel: %d\n", stglb_noncheaplevel);
+    }
+
+    int abort_count = 160;
+    while (stack_size(stack) > 0 && abort_count > 0) {
+        FREES(curr);
+        curr = stack_pop(stack); 
+
+        curr->eqlev_first = path_find_equiv_level(curr->path, firstpath);
+        curr->eqlev_canon = path_find_equiv_level(curr->path, canonpath);
+
+        if (curr->level < stglb_noncheaplevel) stglb_noncheaplevel = curr->level;  /* I don't understand how to really calculate noncheaplevel*/
+        /**
+         * So, about this cheapautom deal...
+         * 
+         * Do this sort of feels like a per-node deal, but we need to figure out when it gets set
+         * to something other the the current level.  perhaps it is simply a matter of making this a
+         * non global, and tracking it per node.   if the cheapautom is false at a node AND the noncheaplevel
+         * is equal to the current level - 1, make it the current level?  For new nodes, set noncheaplevel to
+         * the current value???
+         * 
+         * need to check this wherever cheapautom is called (from the _new functions!) 
+         */
+
+        if (orbits[curr->target_vertex] == curr->target_vertex)   /* ie, not equiv to previous child */
+        {
+            int rtnlevel = othernode_new(curr, stack);
+            path_visualize(curr->path); printf("\n");
+            node_visualize(curr, n); printf("\n");
+printf("stglb_noncheaplevel: %d\n", stglb_noncheaplevel);
+            printf("Return Level: %d\n", rtnlevel);
+            if (rtnlevel < curr->level -1) {
+                while (stack_peek(stack)->level > curr->level) {
+                    Node *dump = stack_pop(stack);
+                    printf("Dumping "); path_visualize(dump->path); printf("\n");
+                    FREES(dump);
+                }
+            }
+        }
+        --abort_count;
+    }
+
+    printf("\n\nStack Peek:\n");
+    curr = stack_peek(stack);
+    if (curr) node_visualize(stack_peek(stack), n);
+    else printf("Empty\n");
+
+    // printf("\n\nStack:\n");
+    // stack_visualize(stack, n);
+
+
+// #if !MAXN
+//     retval = firstpathnode0(root, 1, numcells, &tcnode0);
+// #else   
+//     retval = firstpathnode(root, stack, 1, numcells);
+// #endif  
 
 
 
@@ -558,7 +644,433 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
      * but at this level, those are owned by the calling function.
      */
     FREES(root);
+    FREEPATH(firstpath);
+    FREEPATH(canonpath);
 }
+
+
+/**
+ * First Node Here
+ */
+
+
+static int
+#if !MAXN
+firstnode0(Node *node, Stack *stack, int level, int numcells, tcnode *tcnode_parent)
+#else
+firstnode(Node *node, Stack *stack, int level, int numcells)
+#endif
+{
+    int target_vertex;
+    int first_target_vertex,index,rtnlevel,tcellsize,target_cell,childcount,qinvar,refcode;
+
+#if !MAXN
+    set *tcell;
+    tcnode *tcnode_this;
+
+    tcnode_this = tcnode_parent->next;
+    if (tcnode_this == NULL)
+    {
+        if ((tcnode_this = (tcnode*)ALLOCS(1,sizeof(tcnode))) == NULL ||
+            (tcnode_this->tcellptr
+                         = (set*)ALLOCS(alloc_m,sizeof(set))) == NULL)
+            alloc_error("tcell");
+        tcnode_parent->next = tcnode_this;
+        tcnode_this->next = NULL;
+    }
+    tcell = tcnode_this->tcellptr;
+#else
+    set tcell[MAXM];
+#endif
+
+    ++stats->numnodes;
+    printf("firstnode called at level %d", level);
+    /* refine partition : */
+    doref(g,node->lab,node->ptn,level,&numcells,&qinvar,workperm,
+          node->active,&refcode,dispatch.refine,invarproc,
+          mininvarlevel,maxinvarlevel,invararg,digraph,M,n);
+    firstcode[level] = (short)refcode;                                              /* first only */
+    printf("  refcode %d   numcells %d\n", (short) refcode, numcells);
+    if (qinvar > 0)
+    {
+        ++invapplics;
+        if (qinvar == 2)
+        {
+            ++invsuccesses;
+            if (mininvarlevel < 0) mininvarlevel = level;                           /* first only */
+            if (maxinvarlevel < 0) maxinvarlevel = level;                           /* first only */
+            if (level < invarsuclevel) invarsuclevel = level;
+        }
+    }
+
+    target_cell = -1;
+    if (numcells != n)
+    {
+     /* locate new target cell, setting tc to its position in lab, tcell
+                      to its contents, and tcellsize to its size: */
+        maketargetcell(g,node->lab,node->ptn,level,tcell,&tcellsize,
+                        &target_cell,tc_level,digraph,-1,dispatch.targetcell,M,n);
+        stats->tctotal += tcellsize;
+    }
+    firsttc[level] = target_cell;                                                   /* first only */
+
+    /* optionally call user-defined node examination procedure: */
+    OPTCALL(usernodeproc)
+                   (g,node->lab,node->ptn,level,numcells,target_cell,(int)firstcode[level],M,n);
+
+    if (numcells == n)      /* found first leaf? */
+    {
+        firstterminal(node->lab,level, node);
+        OPTCALL(userlevelproc)(node->lab,node->ptn,level,orbits,stats,0,1,1,n,0,n);
+        if (getcanon && usercanonproc != NULL)
+        {
+            (*dispatch.updatecan)(g,canong,canonlab,stglb_samerows,M,n);
+            stglb_samerows = n;
+            if ((*usercanonproc)(g,canonlab,canong,stats->canupdates,
+                                (int)canoncode[level],M,n))
+                return NAUTY_ABORTED;
+        }
+        return level-1;
+    }
+
+#ifdef NAUTY_IN_MAGMA
+    if (main_seen_interrupt) return NAUTY_KILLED;
+#else
+    if (nauty_kill_request) return NAUTY_KILLED;
+#endif
+
+    if (stglb_noncheaplevel >= level
+                         && !(*dispatch.cheapautom)(node->ptn,level,digraph,n))
+        stglb_noncheaplevel = level + 1;
+
+    /* use the elements of the target cell to produce the children: */
+    index = 0;
+    int temp_queue[tcellsize];
+    int i = tcellsize-1;
+    for (first_target_vertex = target_vertex = nextelement(tcell,M,-1); target_vertex >= 0;
+                                    target_vertex = nextelement(tcell,M,target_vertex))
+    {
+        temp_queue[i] = target_vertex;
+        --i;
+    }
+    Node *child_node;
+    for (i = 0; i < tcellsize; ++i) {
+        child_node = node_make_child(node, n, m);
+        child_node->target_cell = target_cell;
+        child_node->target_vertex = temp_queue[i];
+        child_node->path->path[child_node->path->sz-1] = child_node->target_vertex;
+        stack_push(stack, child_node);
+    }
+    
+    stglb_stabvertex = first_target_vertex;
+
+    return level-1;
+}
+
+/**
+ * New firstpathnode
+ */
+
+static int
+#if !MAXN
+firstpathnode0_new(Node *node, Stack *stack, tcnode *tcnode_parent)
+#else
+firstpathnode_new(Node *node, Stack *stack)
+#endif
+{
+    int target_cell = node->target_cell;
+    int target_vertex = node->target_vertex;
+    int index,rtnlevel,tcellsize,childcount,qinvar,refcode;
+    if (orbits[target_vertex] == target_vertex)   /* ie, not equiv to previous child */
+    {
+        breakout(node->lab,node->ptn,node->level,target_cell,target_vertex,node->active,M);
+        ++node->numcells;
+        ADDELEMENT(node->fixedpts,target_vertex);
+        node->cosetindex = target_vertex;
+
+
+#if !MAXN
+        set *tcell;
+        tcnode *tcnode_this;
+
+        tcnode_this = tcnode_parent->next;
+        if (tcnode_this == NULL)
+        {
+            if ((tcnode_this = (tcnode*)ALLOCS(1,sizeof(tcnode))) == NULL ||
+                (tcnode_this->tcellptr
+                            = (set*)ALLOCS(alloc_m,sizeof(set))) == NULL)
+                alloc_error("tcell");
+            tcnode_parent->next = tcnode_this;
+            tcnode_this->next = NULL;
+        }
+        tcell = tcnode_this->tcellptr;
+#else
+        set tcell[MAXM];
+#endif
+
+        ++stats->numnodes;
+        printf("firstpathnode called at level %d", node->level);
+        /* refine partition : */
+        doref(g,node->lab,node->ptn,node->level,&node->numcells,&qinvar,workperm,
+            node->active,&refcode,dispatch.refine,invarproc,
+            mininvarlevel,maxinvarlevel,invararg,digraph,M,n);
+        firstcode[node->level] = (short)refcode;                                              /* first only */
+        printf("  refcode %d   numcells %d\n", (short) refcode, node->numcells);
+        // node_visualize(node, n);
+        if (qinvar > 0)
+        {
+            ++invapplics;
+            if (qinvar == 2)
+            {
+                ++invsuccesses;
+                if (mininvarlevel < 0) mininvarlevel = node->level;                           /* first only */
+                if (maxinvarlevel < 0) maxinvarlevel = node->level;                           /* first only */
+                if (node->level < invarsuclevel) invarsuclevel = node->level;
+            }
+        }
+
+        target_cell = -1;
+        if (node->numcells != n)
+        {
+        /* locate new target cell, setting target_cell to its position in lab, tcell
+                        to its contents, and tcellsize to its size: */
+            maketargetcell(g,node->lab,node->ptn,node->level,tcell,&tcellsize,
+                            &target_cell,tc_level,digraph,-1,dispatch.targetcell,M,n);
+            stats->tctotal += tcellsize;
+        }
+        firsttc[node->level] = target_cell;                                                   /* first only */
+
+        /* optionally call user-defined node examination procedure: */
+        OPTCALL(usernodeproc)
+                    (g,node->lab,node->ptn,node->level,node->numcells,target_cell,(int)firstcode[node->level],M,n);
+
+        if (node->numcells == n)      /* found first leaf? */
+        {
+            firstterminal(node->lab,node->level, node);
+            OPTCALL(userlevelproc)(node->lab,node->ptn,node->level,orbits,stats,0,1,1,n,0,n);
+            if (getcanon && usercanonproc != NULL)
+            {
+                (*dispatch.updatecan)(g,canong,canonlab,stglb_samerows,M,n);
+                stglb_samerows = n;
+                if ((*usercanonproc)(g,canonlab,canong,stats->canupdates,
+                                    (int)canoncode[node->level],M,n))
+                    return NAUTY_ABORTED;
+            }
+            return 1;  /* return 0 indicating we found the first leaf node */
+        }
+
+#ifdef NAUTY_IN_MAGMA
+        if (main_seen_interrupt) return NAUTY_KILLED;
+#else
+        if (nauty_kill_request) return NAUTY_KILLED;
+#endif
+    /**
+     * 
+     * This seems to be the start of the next level
+     * 
+     */
+        if (stglb_noncheaplevel >= node->level
+                            && !(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
+            stglb_noncheaplevel = node->level + 1;
+
+
+
+        /* use the elements of the target cell to produce the children: */
+        index = 0;
+        // printf("tcellsize: %d\n", tcellsize);
+        int temp_queue[tcellsize];
+        int i = tcellsize-1;
+        for (target_vertex = nextelement(tcell,M,-1); target_vertex >= 0;
+                                        target_vertex = nextelement(tcell,M,target_vertex))
+        {
+            temp_queue[i] = target_vertex;
+            --i;
+        }
+        Node *child_node;
+        for (i = 0; i < tcellsize; ++i) {
+            child_node = node_make_child(node, n, m);
+            child_node->target_cell = target_cell;
+            child_node->target_vertex = temp_queue[i];
+            child_node->path->path[child_node->path->sz-1] = child_node->target_vertex;
+            stack_push(stack, child_node);
+        }
+        
+    }
+
+
+
+/** split here */
+
+
+
+    MULTIPLY(stats->grpsize1,stats->grpsize2,index);
+
+    // if (tcellsize == index && stglb_allsamelevel == level + 1)
+    //     --stglb_allsamelevel;
+
+    // if (domarkers)
+    //     writemarker(level,first_target_vertex,index,tcellsize,stats->numorbits,numcells);
+    // OPTCALL(userlevelproc)(node->lab,node->ptn,level,orbits,stats,first_target_vertex,index,tcellsize,
+    //                                                 numcells,childcount,n);
+    return 0;  /* return 0 to indicate we haven't found a leaf node, keep looking to the left */
+}       
+
+
+
+
+
+
+
+
+static int
+#if !MAXN
+othernode0_new(Node *node, Stack *stack, tcnode *tcnode_parent)
+#else
+othernode_new(Node *node, Stack *stack)
+#endif
+{
+    int target_cell = node->target_cell;
+    int target_vertex = node->target_vertex;
+    int first_target_vertex,refcode,rtnlevel,tcellsize,qinvar;
+    short code;
+#if !MAXN
+    set *tcell;
+    tcnode *tcnode_this;
+
+    tcnode_this = tcnode_parent->next;
+    if (tcnode_this == NULL)
+    {
+        if ((tcnode_this = (tcnode*)ALLOCS(1,sizeof(tcnode))) == NULL ||
+            (tcnode_this->tcellptr
+                     = (set*)ALLOCS(alloc_m,sizeof(set))) == NULL)
+            alloc_error("tcell");
+        tcnode_parent->next = tcnode_this;
+        tcnode_this->next = NULL;
+    }
+    tcell = tcnode_this->tcellptr;
+#else
+    set tcell[MAXM];
+#endif
+
+#ifdef NAUTY_IN_MAGMA
+    if (main_seen_interrupt) return NAUTY_KILLED;
+#else
+    if (nauty_kill_request) return NAUTY_KILLED;
+#endif
+
+    if (orbits[target_vertex] == target_vertex)   /* ie, not equiv to previous child */
+    {
+        breakout(node->lab,node->ptn,node->level,target_cell,target_vertex,node->active,M);
+        ++node->numcells;
+        ADDELEMENT(node->fixedpts,target_vertex);
+
+        ++stats->numnodes;
+
+        /* refine partition : */
+        doref(g,node->lab,node->ptn,node->level,&(node->numcells),&qinvar,workperm,node->active,
+            &refcode,dispatch.refine,invarproc,mininvarlevel,maxinvarlevel,
+            invararg,digraph,M,n);
+        code = (short)refcode;
+
+        if (qinvar > 0)
+        {
+            ++invapplics;
+            if (qinvar == 2)
+            {
+                ++invsuccesses;
+                if (node->level < invarsuclevel) invarsuclevel = node->level;
+            }
+        }
+        /* other only  */
+        if (node->eqlev_first == node->level - 1 && code == firstcode[node->level])
+            node->eqlev_first = node->level;
+        if (getcanon)
+        {
+            if (node->eqlev_canon == node->level - 1)
+            {
+                if (code < canoncode[node->level])
+                    node->comp_canon = -1;              /** SHOULD BE HERE!! */
+                else if (code > canoncode[node->level])
+                    node->comp_canon = 1;
+                else
+                {
+                    node->comp_canon = 0;
+                    node->eqlev_canon = node->level;
+                }
+            }
+            if (node->comp_canon > 0) canoncode[node->level] = code;
+        }
+        /* end other only  */
+
+        target_cell = -1;
+    /* If children will be required, find new target cell and set tc to its
+        position in lab, tcell to its contents, and tcellsize to its size: */
+
+        if (node->numcells < n && (node->eqlev_first == node->level ||
+                            (getcanon && node->comp_canon >= 0)))  /* different condition from first */
+        {
+            /* other only  */
+            if (!getcanon || node->comp_canon < 0)
+            {
+                maketargetcell(g,node->lab,node->ptn,node->level,tcell,&tcellsize,&target_cell,
+                    tc_level,digraph,firsttc[node->level],dispatch.targetcell,M,n);
+                if (target_cell != firsttc[node->level]) node->eqlev_first = node->level - 1;
+            }
+            /* end other only  */
+            else
+                maketargetcell(g,node->lab,node->ptn,node->level,tcell,&tcellsize,&target_cell,
+                    tc_level,digraph,-1,dispatch.targetcell,M,n);
+            stats->tctotal += tcellsize;
+        }
+
+        /* optionally call user-defined node examination procedure: */
+        OPTCALL(usernodeproc)(g,node->lab,node->ptn,node->level,node->numcells,target_cell,(int)code,M,n);
+
+        /* call processnode to classify the type of this node: */
+
+        rtnlevel = processnode(node->lab,node->ptn,node->level,node->numcells, node);
+        if (rtnlevel < node->level) {  /* keep returning if necessary */
+            // printf("\n\nThis is a problem right now!\n\n");
+            return rtnlevel;
+        }
+        if (needshortprune)
+        {
+            needshortprune = FALSE;
+            shortprune(tcell,fmptr-M,M);
+        }
+
+        if (!(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
+            stglb_noncheaplevel = node->level + 1;
+
+        /* use the elements of the target cell to produce the children: */
+        // printf("tcellsize: %d\n", tcellsize);
+        int temp_queue[tcellsize];
+        int i = tcellsize-1;    
+        for (first_target_vertex = target_vertex = nextelement(tcell,M,-1); target_vertex >= 0;
+                                        target_vertex = nextelement(tcell,M,target_vertex))
+        {
+
+            temp_queue[i] = target_vertex;
+            --i;
+        }
+        Node *child_node;
+        for (i = 0; i < tcellsize; ++i) {
+            child_node = node_make_child(node, n, m);
+            child_node->target_cell = target_cell;
+            child_node->target_vertex = temp_queue[i];
+            child_node->path->path[child_node->path->sz-1] = child_node->target_vertex;
+            stack_push(stack, child_node);
+        }
+    }
+
+    return node->level-1;
+}
+
+
+
+
+
+
 
 /*****************************************************************************
 *                                                                            *
@@ -581,9 +1093,9 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
 
 static int
 #if !MAXN
-firstpathnode0(Node *node, int level, int numcells, tcnode *tcnode_parent)
+firstpathnode0(Node *node, Stack *stack, int level, int numcells, tcnode *tcnode_parent)
 #else
-firstpathnode(Node *node, int level, int numcells)
+firstpathnode(Node *node, Stack *stack, int level, int numcells)
 #endif
 {
     int target_vertex;
@@ -612,18 +1124,19 @@ firstpathnode(Node *node, int level, int numcells)
     printf("firstpathnode called at level %d", level);
     /* refine partition : */
     doref(g,node->lab,node->ptn,level,&numcells,&qinvar,workperm,
-          active,&refcode,dispatch.refine,invarproc,
+          node->active,&refcode,dispatch.refine,invarproc,
           mininvarlevel,maxinvarlevel,invararg,digraph,M,n);
-    firstcode[level] = (short)refcode;
+    firstcode[level] = (short)refcode;                                              /* first only */
     printf("  refcode %d   numcells %d\n", (short) refcode, numcells);
+
     if (qinvar > 0)
     {
         ++invapplics;
         if (qinvar == 2)
         {
             ++invsuccesses;
-            if (mininvarlevel < 0) mininvarlevel = level;
-            if (maxinvarlevel < 0) maxinvarlevel = level;
+            if (mininvarlevel < 0) mininvarlevel = level;                           /* first only */
+            if (maxinvarlevel < 0) maxinvarlevel = level;                           /* first only */
             if (level < invarsuclevel) invarsuclevel = level;
         }
     }
@@ -631,13 +1144,13 @@ firstpathnode(Node *node, int level, int numcells)
     target_cell = -1;
     if (numcells != n)
     {
-     /* locate new target cell, setting tc to its position in lab, tcell
+     /* locate new target cell, setting target_cell to its position in lab, tcell
                       to its contents, and tcellsize to its size: */
         maketargetcell(g,node->lab,node->ptn,level,tcell,&tcellsize,
                         &target_cell,tc_level,digraph,-1,dispatch.targetcell,M,n);
         stats->tctotal += tcellsize;
     }
-    firsttc[level] = target_cell;
+    firsttc[level] = target_cell;                                                   /* first only */
 
     /* optionally call user-defined node examination procedure: */
     OPTCALL(usernodeproc)
@@ -655,14 +1168,21 @@ firstpathnode(Node *node, int level, int numcells)
                                 (int)canoncode[level],M,n))
                 return NAUTY_ABORTED;
         }
+node_visualize(node, n); 
+printf("stglb_noncheaplevel: %d\n", stglb_noncheaplevel);
+printf("\n");
         return level-1;
     }
+node_visualize(node, n);   /* Moved here so the eqlev values that are set in firstterminal display correctly */
+printf("stglb_noncheaplevel: %d\n", stglb_noncheaplevel);
+printf("\n");
 
 #ifdef NAUTY_IN_MAGMA
     if (main_seen_interrupt) return NAUTY_KILLED;
 #else
     if (nauty_kill_request) return NAUTY_KILLED;
 #endif
+
 /**
  * 
  * This seems to be the start of the next level
@@ -677,10 +1197,15 @@ firstpathnode(Node *node, int level, int numcells)
     for (first_target_vertex = target_vertex = nextelement(tcell,M,-1); target_vertex >= 0;
                                     target_vertex = nextelement(tcell,M,target_vertex))
     {
+        node->target_cell = target_cell;
+        node->target_vertex = target_vertex;
+        // printf("FTV: %d    target_vertex: %d\n", first_target_vertex, target_vertex);
         if (orbits[target_vertex] == target_vertex)   /* ie, not equiv to previous child */
         {
-            breakout(node->lab,node->ptn,level+1,target_cell,target_vertex,active,M);
-            ADDELEMENT(fixedpts,target_vertex);
+            // continue;
+
+            breakout(node->lab,node->ptn,level+1,target_cell,target_vertex,node->active,M);
+            ADDELEMENT(node->fixedpts,target_vertex);
             node->cosetindex = target_vertex;
             if (target_vertex == first_target_vertex)
             {
@@ -692,10 +1217,11 @@ firstpathnode(Node *node, int level, int numcells)
  * on the stack
  * 
  */                
+
 #if !MAXN
                 rtnlevel = firstpathnode0(node, level+1, numcells+1, tcnode_this);
 #else
-                rtnlevel = firstpathnode(node, level+1, numcells+1);
+                rtnlevel = firstpathnode(node, stack, level+1, numcells+1);
 #endif
                 childcount = 1;
                 node->gca_first = level;
@@ -710,7 +1236,7 @@ firstpathnode(Node *node, int level, int numcells)
 #endif
                 ++childcount;
             }
-            DELELEMENT(fixedpts,target_vertex);
+            DELELEMENT(node->fixedpts,target_vertex);
             if (rtnlevel < level)
                 return rtnlevel;
             if (needshortprune)
@@ -733,7 +1259,7 @@ firstpathnode(Node *node, int level, int numcells)
     OPTCALL(userlevelproc)(node->lab,node->ptn,level,orbits,stats,first_target_vertex,index,tcellsize,
                                                     numcells,childcount,n);
     return level-1;
-}
+}       
 
 /*****************************************************************************
 *                                                                            *
@@ -786,10 +1312,14 @@ othernode(Node *node, int level, int numcells)
     ++stats->numnodes;
 
     /* refine partition : */
-    doref(g,node->lab,node->ptn,level,&numcells,&qinvar,workperm,active,
+    doref(g,node->lab,node->ptn,level,&numcells,&qinvar,workperm,node->active,
           &refcode,dispatch.refine,invarproc,mininvarlevel,maxinvarlevel,
           invararg,digraph,M,n);
     code = (short)refcode;
+node_visualize(node, n); 
+printf("stglb_noncheaplevel: %d\n", stglb_noncheaplevel);
+printf("\n");
+
     if (qinvar > 0)
     {
         ++invapplics;
@@ -799,7 +1329,7 @@ othernode(Node *node, int level, int numcells)
             if (level < invarsuclevel) invarsuclevel = level;
         }
     }
-
+    /* other only  */
     if (node->eqlev_first == level - 1 && code == firstcode[level])
         node->eqlev_first = level;
     if (getcanon)
@@ -807,7 +1337,7 @@ othernode(Node *node, int level, int numcells)
         if (node->eqlev_canon == level - 1)
         {
             if (code < canoncode[level])
-                node->comp_canon = -1;
+                node->comp_canon = -1;       /** HERE!!! */
             else if (code > canoncode[level])
                 node->comp_canon = 1;
             else
@@ -818,20 +1348,23 @@ othernode(Node *node, int level, int numcells)
         }
         if (node->comp_canon > 0) canoncode[level] = code;
     }
+    /* end other only  */
 
     tc = -1;
    /* If children will be required, find new target cell and set tc to its
       position in lab, tcell to its contents, and tcellsize to its size: */
 
     if (numcells < n && (node->eqlev_first == level ||
-                         (getcanon && node->comp_canon >= 0)))
+                         (getcanon && node->comp_canon >= 0)))  /* different condition from first */
     {
+        /* other only  */
         if (!getcanon || node->comp_canon < 0)
         {
             maketargetcell(g,node->lab,node->ptn,level,tcell,&tcellsize,&tc,
                   tc_level,digraph,firsttc[level],dispatch.targetcell,M,n);
             if (tc != firsttc[level]) node->eqlev_first = level - 1;
         }
+        /* end other only  */
         else
             maketargetcell(g,node->lab,node->ptn,level,tcell,&tcellsize,&tc,
                   tc_level,digraph,-1,dispatch.targetcell,M,n);
@@ -859,14 +1392,17 @@ othernode(Node *node, int level, int numcells)
     for (tv1 = tv = nextelement(tcell,M,-1); tv >= 0;
                                     tv = nextelement(tcell,M,tv))
     {
-        breakout(node->lab,node->ptn,level+1,tc,tv,active,M);
-        ADDELEMENT(fixedpts,tv);
+                node->target_cell = tc;
+        node->target_vertex = tv;
+        breakout(node->lab,node->ptn,level+1,tc,tv,node->active,M);
+        ADDELEMENT(node->fixedpts,tv);
+
 #if !MAXN   
         rtnlevel = othernode0(lab, ptn, level+1, numcells+1, node, tcnode_this);
 #else
         rtnlevel = othernode(node,level+1,numcells+1);
 #endif
-        DELELEMENT(fixedpts,tv);
+        DELELEMENT(node->fixedpts,tv);
 
         if (rtnlevel < level) return rtnlevel;
     /* use stored automorphism data to prune target cell: */
@@ -877,8 +1413,8 @@ othernode(Node *node, int level, int numcells)
         }
         if (tv == tv1)
         {
-            longprune(tcell,fixedpts,workspace,fmptr,M);
-            if (doschreier) pruneset(fixedpts,gp,&gens,tcell,M,n);
+            longprune(tcell,node->fixedpts,workspace,fmptr,M);
+            if (doschreier) pruneset(node->fixedpts,gp,&gens,tcell,M,n);
         }
 
         recover(node->ptn,level, node);
@@ -907,6 +1443,13 @@ firstterminal(int *lab, int level, Node *node)
 
     for (i = 0; i < n; ++i) firstlab[i] = lab[i];
 
+    /* my addition */
+    FREEPATH(firstpath);
+    FREEPATH(canonpath);
+    firstpath = path_deep_copy(node->path);
+    canonpath = path_deep_copy(node->path);
+    /* end of my addition */
+    
     if (getcanon)
     {
         stglb_canonlevel = node->eqlev_canon = node->gca_canon = level;
@@ -1048,6 +1591,11 @@ processnode(int *lab, int *ptn, int level, int numcells, Node *node)
         return node->gca_canon;
 
     case 3:                 /* lab is better than canonlab */
+        /* my addition */
+        FREEPATH(canonpath);
+        canonpath = path_deep_copy(node->path);
+        /* end of my addition */
+
         ++stats->canupdates;
         for (i = 0; i < n; ++i) canonlab[i] = lab[i];
         stglb_canonlevel = node->eqlev_canon = node->gca_canon = level;
