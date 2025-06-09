@@ -758,9 +758,9 @@ firstnode(Node *node, Stack *stack)
  * Not sure if the noncheaplevel is needed here, since this is the first node, I don't think,
  * with the current logic, it can ever be anything other than 1 at this point.
  */
-    if (node->noncheaplevel >= node->level - 1
-                         && !(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
-        node->noncheaplevel = node->level;
+    // if (node->noncheaplevel >= node->level - 1
+    //                      && !(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
+    //     node->noncheaplevel = node->level;
 
     /* use the elements of the target cell to produce the children: */
     index = 0;
@@ -800,8 +800,21 @@ firstpathnode_new(Node *node, Stack *stack)
     int target_cell = node->target_cell;
     int target_vertex = node->target_vertex;
     int index,rtnlevel,tcellsize,childcount,qinvar,refcode;
+
+
+
+
     if (orbits[target_vertex] == target_vertex)   /* ie, not equiv to previous child */
     {
+        /**
+         * Moved this here so the noncheaplevel is computed for the current node
+         * before the breakout happens.  This is essentially the order the process
+         * happens in when this is recursive, only in the code, it is recalculated 
+         * before the breakout at the end.
+         */
+        if (node->noncheaplevel >= node->level - 1 && !(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
+            node->noncheaplevel = node->level;  
+
         breakout(node->lab,node->ptn,node->level,target_cell,target_vertex,node->active,M);
         ++node->numcells;
         ADDELEMENT(node->fixedpts,target_vertex);
@@ -887,9 +900,7 @@ firstpathnode_new(Node *node, Stack *stack)
 #endif
 
 
-        if (node->noncheaplevel >= node->level - 1
-                            && !(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
-            node->noncheaplevel = node->level;                    
+                  
 
 
 
@@ -978,6 +989,15 @@ othernode_new(Node *node, Stack *stack)
 
     if (orbits[target_vertex] == target_vertex)   /* ie, not equiv to previous child */
     {
+        /**
+         * Moved this here so the noncheaplevel is computed for the current node
+         * before the breakout happens.  This is essentially the order the process
+         * happens in when this is recursive, only in the code, it is recalculated 
+         * before the breakout at the end.
+         */
+        if (!(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
+        node->noncheaplevel = node->level;
+
         breakout(node->lab,node->ptn,node->level,target_cell,target_vertex,node->active,M);
         ++node->numcells;
         ADDELEMENT(node->fixedpts,target_vertex);
@@ -1057,8 +1077,7 @@ othernode_new(Node *node, Stack *stack)
             shortprune(tcell,fmptr-M,M);
         }
 
-        if (!(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
-            node->noncheaplevel = node->level;
+
 
         /* use the elements of the target cell to produce the children: */
         // printf("tcellsize: %d\n", tcellsize);
