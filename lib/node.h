@@ -37,7 +37,8 @@ typedef struct
     int eqlev_first;    /* level to which codes for this node match those for first leaf */
     int eqlev_canon;    /* level to which codes for this node match those for the bsf leaf. */    
     int comp_canon;     /* -1,0,1 according as code at eqlev_canon+1 is <,==,> that for bsf leaf.  Also used for similar purpose during leaf processing */
-    int cosetindex;     /* the point being fixed at level gca_first */    
+    int cosetindex;     /* the point being fixed at level gca_first */
+    int noncheaplevel;  /* level of greatest ancestor for which cheapautom==FALSE */
 } Node;
  
 

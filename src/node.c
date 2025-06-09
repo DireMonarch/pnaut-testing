@@ -35,6 +35,7 @@ Node* node_make_child(Node *src, int n, int m) {
     dst->numcells = src->numcells;
     dst->target_cell = src->target_cell;
     dst->target_vertex = src->target_vertex;
+    dst->noncheaplevel = src->noncheaplevel;
 
     dst->path = path_make_child_path(src->path);
 
