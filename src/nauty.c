@@ -864,10 +864,6 @@ firstpathnode_new(Node *node, Stack *stack)
                     (g,node->lab,node->ptn,node->level,node->numcells,target_cell,(int)firstcode[node->level],M,n);
 
                     
-        /* Moved this from below the NAUTY_KILLED section */
-        if (node->noncheaplevel >= node->level - 1
-                            && !(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
-            node->noncheaplevel = node->level;                    
 
         if (node->numcells == n)      /* found first leaf? */
         {
@@ -891,6 +887,9 @@ firstpathnode_new(Node *node, Stack *stack)
 #endif
 
 
+        if (node->noncheaplevel >= node->level - 1
+                            && !(*dispatch.cheapautom)(node->ptn,node->level,digraph,n))
+            node->noncheaplevel = node->level;                    
 
 
 
