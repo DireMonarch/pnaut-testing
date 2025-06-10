@@ -77,6 +77,7 @@
 #include "node.h"
 #include "nsb_stack.h"
 #include "path.h"
+#include "util.h"
 
 #ifdef NAUTY_IN_MAGMA
 #include "cleanup.e"
@@ -168,6 +169,7 @@ static TLS_ATTR int
     stglb_samerows,        /* number of rows of canong which are correct for the bsf leaf  BDM:correct description? */
     stglb_canonlevel,      /* level of bsf leaf */
     stglb_stabvertex;      /* point fixed in ancestor of first leaf at level gca_canon */ /* Seems to only be used in userautomproc */
+
 
 /* trying to eliminate this, and move it to node */
 #ifdef _RECURSE_
@@ -274,6 +276,8 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
     int numcells;
     int retval;
     int initstatus;
+
+    double start_time, end_time;
 #if !MAXN
     tcnode *tcp,*tcq;
 #endif
@@ -534,6 +538,8 @@ nauty(graph *g_arg, int *lab, int *ptn, set *active_arg,
     root->numcells = numcells;
     root->level = 1;
 
+    start_time = wtime();
+
 #ifndef _RECURSE_
 
 #if !MAXN
@@ -617,6 +623,9 @@ printf("noncheaplevel: %d\n", curr->noncheaplevel);
 
 #endif /* _RECURSE_ */
 
+    end_time = wtime();
+
+    printf("Algorithm Execution Time: %f\n", end_time - start_time);
 
     if (retval == NAUTY_ABORTED)
         stats->errstatus = NAUABORTED;

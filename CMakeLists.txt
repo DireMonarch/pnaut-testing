@@ -11,6 +11,7 @@ add_executable(${PROJECT_NAME} main.c
     ${SOURCE_FOLDER}nsb_stack.c
     ${SOURCE_FOLDER}node.c
     ${SOURCE_FOLDER}path.c
+    ${SOURCE_FOLDER}util.c
     ${OVERRIDE_FOLDER}nauty.c
     ${OVERRIDE_FOLDER}nautil.c
     ${OVERRIDE_FOLDER}naugraph.c
